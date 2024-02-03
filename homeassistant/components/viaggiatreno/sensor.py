@@ -9,7 +9,7 @@ import time
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity
+from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorEntity, SensorDeviceClass
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -31,6 +31,7 @@ MONITORED_INFO = [
     "categoria",
     "compOrarioArrivoZeroEffettivo",
     "compOrarioPartenzaZeroEffettivo",
+    "compOraUltimoRilevamento",
     "destinazione",
     "numeroTreno",
     "orarioArrivo",
@@ -102,6 +103,7 @@ class ViaggiaTrenoSensor(SensorEntity):
         self._unit = ""
         self._icon = ICON
         self._station_id = station_id
+        self.train_id = train_id
         self._name = name
 
         self.uri = VIAGGIATRENO_ENDPOINT.format(
@@ -112,6 +114,16 @@ class ViaggiaTrenoSensor(SensorEntity):
     def name(self):
         """Return the name of the sensor."""
         return self._name
+
+    @property
+    def device_class(self):
+        """Return device class."""
+        return SensorDeviceClass.ENUM
+
+    @property
+    def options(self):
+        """Return list of possible states"""
+        return [ARRIVED_STRING, CANCELLED_STRING, NOT_DEPARTED_STRING, NO_INFORMATION_STRING]
 
     @property
     def native_value(self):
@@ -133,6 +145,11 @@ class ViaggiaTrenoSensor(SensorEntity):
         """Return extra attributes."""
         return self._attributes
 
+    @property
+    def uri(self):
+        """return uri with actual time"""
+        return VIAGGIATRENO_ENDPOINT.format(station_id=self._station_id, train_id=self._train_id, timestamp=int(time.time()) * 1000)
+    
     @staticmethod
     def has_departed(data):
         """Check if the train has actually departed."""
@@ -163,13 +180,12 @@ class ViaggiaTrenoSensor(SensorEntity):
         """Update state."""
         uri = self.uri
         res = await async_http_request(self.hass, uri)
+        self._unit = ""
         if res.get("error", ""):
             if res["error"] == 204:
                 self._state = NO_INFORMATION_STRING
-                self._unit = ""
             else:
                 self._state = "Error: {}".format(res["error"])
-                self._unit = ""
         else:
             for i in MONITORED_INFO:
                 self._attributes[i] = res[i]
@@ -177,13 +193,10 @@ class ViaggiaTrenoSensor(SensorEntity):
             if self.is_cancelled(res):
                 self._state = CANCELLED_STRING
                 self._icon = "mdi:cancel"
-                self._unit = ""
             elif not self.has_departed(res):
                 self._state = NOT_DEPARTED_STRING
-                self._unit = ""
             elif self.has_arrived(res):
                 self._state = ARRIVED_STRING
-                self._unit = ""
             else:
                 self._state = res.get("ritardo")
                 self._unit = UnitOfTime.MINUTES
